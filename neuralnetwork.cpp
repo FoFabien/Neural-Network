@@ -4,6 +4,7 @@
 #include <chrono>
 #include <thread>
 #include <map>
+#include <algorithm>
 
 NeuralNetwork::NeuralNetwork()
 {
@@ -52,6 +53,20 @@ bool NeuralNetwork::connectNeurons(NeuCoor a, NeuCoor b)
     return true;
 }
 
+void NeuralNetwork::autoConnect()
+{
+    for(size_t i = 1; i < network.size(); ++i)
+    {
+        for(size_t j = 0; j < network[i].size(); ++j)
+        {
+            for(size_t k = 0; k < network[i-1].size(); ++k)
+            {
+                connectNeurons(NeuCoor(i-1, k), NeuCoor(i, j));
+            }
+        }
+    }
+}
+
 void NeuralNetwork::setInput(const float &value, const size_t &key)
 {
     if(key < inputs.size())
@@ -62,6 +77,32 @@ void NeuralNetwork::setInput(const std::vector<float> &values)
 {
     for(size_t i = 0; i < values.size() && i < inputs.size(); ++i)
         *(inputs[i]) = values[i];
+}
+
+void NeuralNetwork::resizeLayer(size_t layer, size_t size)
+{
+    if(size == 0)
+        return;
+    std::normal_distribution<float> d(0.5, 1.f);
+    if(layer < network.size() && layer > 0)
+    {
+        while(network[layer].size() < size)
+        {
+            network[layer].push_back(new Neuron());
+            for(size_t i = 0; i < network[layer-1].size(); ++i)
+                network[layer].back()->addInput(network[layer-1][i], d(gen));
+            for(size_t i = 0; layer+1 < network.size() && i < network[layer+1].size(); ++i)
+                network[layer+1][i]->addInput(network[layer].back(), d(gen));
+        }
+        while(network[layer].size() > size)
+        {
+            for(size_t i = 0; layer+1 < network.size() && i < network[layer+1].size(); ++i)
+                network[layer+1][i]->delInput(network[layer].back());
+            delete network[layer].back();
+            network[layer].pop_back();
+        }
+        std::cout << network[layer].size() << std::endl;
+    }
 }
 
 std::vector<float> NeuralNetwork::getOutputs()
@@ -117,57 +158,100 @@ void NeuralNetwork::readyNetwork()
     }
 }
 
-bool NeuralNetwork::train(std::vector<std::vector<float> >& inputs, std::vector<std::vector<float> >& outputs, float learning_rate, size_t repeat, bool print)
+bool NeuralNetwork::runTraining(std::vector<std::vector<float> > inputs, std::vector<std::vector<float> > outputs, size_t epochs, float learning_rate, bool print)
 {
-    if(inputs.size() != outputs.size())
+    if(inputs.size() != outputs.size() || inputs.empty())
+        return false;
+
+    std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+    size_t step = epochs / 10;
+    if(epochs < 10)
+        step = epochs;
+
+    // number of time the dataset is used
+    for(size_t i = 0; i < epochs; i++)
+    {
+        if((i+1) % step == 0 && print)
+        {
+            std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+            std::cout << "### epoch: " << i+1 << " (" << (100*(i+1)/(epochs*1.f)) << "%) : elapsed = " << std::chrono::duration_cast<std::chrono::seconds>(end - begin).count() << "s" << std::endl;
+        }
+
+        if(!train(inputs, outputs, learning_rate, print && ((i+1) % step == 0)))
+        {
+            std::cout << "error at epoch " << i << std::endl;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return true;
+}
+
+bool NeuralNetwork::train(const std::vector<std::vector<float> >& inputs, const std::vector<std::vector<float> >& outputs, float learning_rate, bool print)
+{
+    if(inputs.size() != outputs.size() || inputs.empty())
         return false;
     if(print)
         std::cout << "=== Results ====" << std::endl;
 
-    for(size_t i = 0; i < inputs.size(); i++)
+    // shuffle (create a random list of key to access inputs/outputs in a random order
+    std::vector<size_t> keys;
+    for(size_t i = 0; i < inputs.size(); ++i)
+        keys.push_back(i);
+    std::shuffle(std::begin(keys), std::end(keys), gen);
+
+    float mse;
+    for(auto& i: keys)
     {
-        for(size_t s = 0; s < repeat; ++s)
+        readyNetwork();
+        setInput(inputs[i]);
+        std::vector<float> res = getOutputs();
+        std::vector<float> err;
+        if(res.size() != outputs[i].size() || res.empty())
+            return false;
+
+
+        if(print && (i >= inputs.size() - 5 || inputs.size() <= 5))
         {
-            readyNetwork();
-            setInput(inputs[i]);
-            std::vector<float> res = getOutputs();
-            std::vector<float> err;
-            if(res.size() != outputs[i].size() || res.empty())
-                return false;
+            std::cout << "Input(s): ";
+            for(const float& n : inputs[i])
+                std::cout << n << " ";
+            std::cout << " | Output(s): ";
+            for(const float& r : res)
+                std::cout << r << " ";
+            std::cout << std::endl;
 
-            if(print && s == repeat-1)
-            {
-                std::cout << "Input(s): ";
-                for(float& n : inputs[i])
-                    std::cout << n << " ";
-                std::cout << " | Output(s): ";
-                for(float& r : res)
-                    std::cout << r << " ";
-                std::cout << std::endl;
-            }
+            mse = 0.f;
+            for(size_t j = 0; j < res.size(); ++j)
+                mse += (outputs[i][j] - res[j]) * (outputs[i][j] - res[j]);
+            mse /= res.size();
+            std::cout << "MSE= " << mse << std::endl;
+        }
 
-            for(size_t j = network.size()-1; j > 0; --j)
+        std::vector<float> test1, test2;
+        for(size_t j = network.size()-1; j > 0; --j)
+        {
+            for(size_t k = 0; k < network[j].size(); ++k)
             {
-                for(size_t k = 0; k < network[j].size(); ++k)
+                if(j == network.size()-1)
                 {
-                    if(j == network.size()-1)
+                    network[j][k]->doGradient((res[k] - outputs[i][k]), learning_rate);
+                    test1.push_back(outputs[i][k]);
+                }
+                else
+                {
+                    float sum = 0;
+                    for(size_t l = 0; l < network[j+1].size(); ++l)
                     {
-                        network[j][k]->doGradient(outputs[i][k], learning_rate);
+                        float t = network[j+1][l]->getOutput();
+                        sum += (t - test2[l]) * t * (1 - t) * getWeight({j, k}, {j+1, l});
+                        test1.push_back(t);
                     }
-                    else // improve for more hidden layers
-                    {
-                        float sum = 0;
-                        for(size_t l = 0; l < network[j+1].size(); ++l)
-                        {
-                            float t = network[j+1][l]->getOutput();
-                            sum += (t - outputs[i][l]) * t * (1 - t) * getWeight({j, k}, {j+1, l});
-                        }
-                        network[j][k]->doBackProp(sum, learning_rate);
-                    }
+                    network[j][k]->doGradient(sum, learning_rate);
                 }
             }
-            if(s % 100 == 0)
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            test2 = test1;
+            test1.clear();
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
@@ -197,7 +281,7 @@ void NeuralNetwork::print()
     }
 }
 
-#define FVERSION 0x00000000
+#define FVERSION 2
 bool NeuralNetwork::load(const std::string &filename)
 {
     std::ifstream f(filename.c_str(), std::ios::in);
@@ -207,8 +291,11 @@ bool NeuralNetwork::load(const std::string &filename)
     size_t tmp;
     size_t last = 0;
     f >> tmp;
-    if(tmp != FVERSION)
+    if(tmp > FVERSION)
         return false;
+
+    if(tmp == 1) // backward compatibility
+        f >> tmp; // sigmoid type
 
     // clear
     for(size_t i = 0; i < network.size(); ++i)

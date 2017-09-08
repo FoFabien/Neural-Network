@@ -22,14 +22,17 @@ class NeuralNetwork
         NeuralNetwork(std::vector<size_t> sizes);
         ~NeuralNetwork();
         bool connectNeurons(NeuCoor a, NeuCoor b); // a will be an input of b
+        void autoConnect();
         void setInput(const float &value, const size_t &key);
         void setInput(const std::vector<float> &values);
+        void resizeLayer(size_t layer, size_t size);
         std::vector<float> getOutputs();
         float getWeight(NeuCoor a, NeuCoor b);
 
         void initNetwork();
         void readyNetwork();
-        bool train(std::vector<std::vector<float> >& inputs, std::vector<std::vector<float> >& outputs, float learning_rate, size_t repeat, bool print = false);
+        bool runTraining(std::vector<std::vector<float> > inputs, std::vector<std::vector<float> > outputs, size_t epochs, float learning_rate, bool print);
+        bool train(const std::vector<std::vector<float> >& inputs, const std::vector<std::vector<float> >& outputs, float learning_rate, bool print);
         void print();
         bool load(const std::string &filename);
         bool save(const std::string &filename);

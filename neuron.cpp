@@ -2,6 +2,11 @@
 #include <cmath>
 #include <iostream>
 
+#define M_PI_2        1.57079632679489661923	/* pi/2 */
+#define M_PI_2_INV    (1.0/M_PI_2)
+#define M_2_SQRTPI    1.12837916709551257390    /* 2/sqrt(pi) */
+#define ERF_COEF      (1.0/M_2_SQRTPI)
+
 Neuron::Neuron()
 {
     lastResult = 0.f;
@@ -31,6 +36,18 @@ void Neuron::addInput(NeuInput in)
     inputs.push_back(in);
 }
 
+void Neuron::delInput(void *ptr)
+{
+    for(std::vector<NeuInput>::iterator it = inputs.begin(); it != inputs.end(); ++it)
+    {
+        if(it->ptr == ptr)
+        {
+            inputs.erase(it);
+            return;
+        }
+    }
+}
+
 std::vector<NeuInput>& Neuron::getInputs()
 {
     return inputs;
@@ -57,13 +74,6 @@ bool Neuron::isReady() const
     return ready;
 }
 
-float Neuron::getSum()
-{
-    if(!ready)
-        getOutput();
-    return sum;
-}
-
 float Neuron::getOutput()
 {
     if(ready)
@@ -80,39 +90,14 @@ float Neuron::getOutput()
             in = (*((float*)i.ptr));
         sum += i.weight * in;
     }
+
     lastResult = 1 / (1 + exp(-sum));
+
     ready = true;
     return lastResult;
 }
 
-float Neuron::getOutputPrime()
-{
-    if(!ready)
-        getOutput();
-    return lastResult * (1 - lastResult);
-}
-
-float Neuron::getSquaredLoss(float actual)
-{
-    if(!ready)
-        getOutput();
-    return 0.5 * (actual - lastResult) * (actual - lastResult);
-}
-
-void Neuron::doGradient(float actual, float step)
-{
-    if(!ready)
-        getOutput();
-    for(auto& i : inputs)
-    {
-        if(i.isNeuron)
-            i.weight = i.weight - step * (lastResult - actual) * lastResult * (1 - lastResult) * ((Neuron*)i.ptr)->getOutput();
-        /*else
-            i.weight = i.weight - step * (lastResult - actual) * lastResult * (1 - lastResult) * (*(float*)i.ptr);*/
-    }
-}
-
-void Neuron::doBackProp(float sum, float step)
+void Neuron::doGradient(float sum, float step)
 {
     if(!ready)
         getOutput();
@@ -120,8 +105,6 @@ void Neuron::doBackProp(float sum, float step)
     {
         if(i.isNeuron)
             i.weight = i.weight - step * sum * lastResult * (1 - lastResult) * ((Neuron*)i.ptr)->getOutput();
-        /*else
-            i.weight = i.weight - step * sum * lastResult * (1 - lastResult) * (*(float*)i.ptr);*/
     }
 }
 

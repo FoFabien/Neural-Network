@@ -1,74 +1,101 @@
 #include <iostream>
-#include <utility>
-#include <chrono>
-#include <thread>
+#include <cmath>
 
 #include "neuralnetwork.hpp"
 
-void loadAndRun()
+void loadAndRun(const std::string &file)
 {
     NeuralNetwork test;
-    if(test.load("network.txt"))
+    if(test.load(file))
     {
-        std::cout << "Network loaded" << std::endl;
-        test.readyNetwork();
-        test.setInput({0, 1});
-        std::vector<float> res = test.getOutputs();
-        std::cout << "Input(s): 0 1 ";
-        std::cout << " | Output(s): ";
-        for(float& r : res)
-            std::cout << r << " ";
-        std::cout << std::endl;
+        std::cout << "Network loaded from " << file << std::endl;
+        for(size_t i = 0; i < 4; ++i)
+        {
+            test.readyNetwork();
+            switch(i)
+            {
+                case 1: test.setInput({0, 1}); std::cout << "Input(s): 0 1 "; break;
+                case 2: test.setInput({1, 0}); std::cout << "Input(s): 1 0 "; break;
+                case 3: test.setInput({1, 1}); std::cout << "Input(s): 1 1 "; break;
+                default: test.setInput({0, 0}); std::cout << "Input(s): 0 0 "; break;
+            }
+
+            std::vector<float> res = test.getOutputs();
+            std::cout << " | Output(s): ";
+            for(float& r : res)
+                if(r > 0.9) std::cout << "1 ";
+                else if(r < 0.1) std::cout << "0 ";
+                else std::cout << "error ";
+            std::cout << std::endl;
+        }
     }
     else
-        std::cout << "Can't load the neural network" << std::endl;
+        std::cout << "Can't load the neural network from " << file << std::endl;
 }
 
-void createAndTrain()
+
+void train(NeuralNetwork &test)
 {
     std::vector<std::vector<float> > inputs = {{0, 0}, {0, 1}, {1, 1}, {1, 0}};
     std::vector<std::vector<float> > outputs = {{0}, {1}, {0}, {1}};
-    size_t hlayer_size = 2;
-    NeuralNetwork test({2, hlayer_size, 1});
-    for(size_t j = 0; j < hlayer_size; j++) // number of neurons on layer 2
-    {
-        for(size_t i = 0; i < 2; i++) // number of neurons on layer 1
-        {
-            test.connectNeurons(NeuCoor(0, i), NeuCoor(1, j)); // connecting 1st to 2nd layer
-        }
-        test.connectNeurons(NeuCoor(1, j), NeuCoor(2, 0)); // connecting 2nd to 3rd layer
-    }
-    test.initNetwork();
-    test.print();
-    std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-    size_t max_step = 2000;
-    for(size_t i = 0; i < max_step; i++)
-    {
-        if((i+1) % 1000 == 0)
-        {
-            std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-            std::cout << "### step: " << i+1 << " (" << (100*(i+1)/(max_step*1.f)) << "%) : elapsed = " << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << "ms" << std::endl;
-        }
+    test.runTraining(inputs, outputs, 100000, 0.8, true);
+}
 
-        if(!test.train(inputs, outputs, 0.05, 1000, (i == max_step-1)))
-        {
-            std::cout << "error at step " << i << std::endl;
-            break;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+void createAndTrain(const std::string &file)
+{
+    NeuralNetwork test({2, 2, 1});
+    test.autoConnect();
+    test.initNetwork();
+    train(test);
+    if(test.save(file))
+        std::cout << "Network saved to " << file << std::endl;
+}
+
+void resumeTraining(const std::string &file)
+{
+    NeuralNetwork test;
+    if(test.load(file))
+    {
+        std::cout << "Network loaded from " << file << std::endl;
+        train(test);
+        if(test.save(file))
+            std::cout << "Network saved to " << file << std::endl;
     }
-    test.print();
-    if(test.save("network.txt"))
-        std::cout << "Network saved" << std::endl;
+    else
+        std::cout << "Can't load the neural network from " << file << std::endl;
 }
 
 int main(int argc, char *argv[])
 {
     std::cout << "Hello world!" << std::endl;
-    if(argc >= 2 && std::string(argv[1]) == "-n")
-        createAndTrain();
+    size_t type = 0;
+    for(int i = 1; i < argc-1; ++i)
+    {
+        if(std::string(argv[i]) == "-n")
+            type = 1;
+        else if(std::string(argv[i]) == "-r")
+            type = 2;
+        else if(std::string(argv[i]) == "-l")
+            type = 3;
+    }
+    std::string file = argv[argc-1];
+
+    if(argc >= 2 && type > 0 && !file.empty())
+    {
+        switch(type)
+        {
+            case 1: createAndTrain(file); break;
+            case 2: resumeTraining(file); break;
+            case 3: loadAndRun(file); break;
+        }
+    }
     else
-        loadAndRun();
+    {
+        std::cout << "usage: app.exe [-n|-r|-l] filename" << std::endl;
+        std::cout << "\t-n : create a new network, train and save it" << std::endl;
+        std::cout << "\t-r : load and resume the network training" << std::endl;
+        std::cout << "\t-l : load the network and run it" << std::endl;
+    }
 
     return 0;
 }
