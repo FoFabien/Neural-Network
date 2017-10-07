@@ -7,7 +7,7 @@ NeuralNetwork object defines the whole set of Neuron.
 "main.cpp" is an example. It trains and uses the network as an XOR operation.  
   
 ### Random Notes:  
-- Switched from double to float for increased precision.  
+- Switched from float to double for increased precision.  
 - Using a Kahan summation to minimize precision loss.  
 - Double are written in full precision in the save file.  
 - Biases needs more testing but they should behave properly.  
