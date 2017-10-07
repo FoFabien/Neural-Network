@@ -10,10 +10,10 @@ NeuralNetwork object defines the whole set of Neuron.
 - Switched from float to double for increased precision.  
 - Using a Kahan summation to minimize precision loss.  
 - Double are written in full precision in the save file.  
-- Biases needs more testing but they should behave properly.  
-- Overall math formalas must be checked again.  
+- Biases need more testing but they should behave properly.  
+- Overall math formulas must be checked again.  
   
 ### To Do:  
-- Check if the Kahan sum is really needed to keep a good precision on double.
+- Check if the Kahan sum is really needed to keep a good precision.
 - Try to improve the algorithm (emphazise on faster/lighter code). Maybe review the overall architecture of the code.  
 - Try to run the code on a GPU (I need to get my hand on a more recent graphic card)
