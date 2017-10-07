@@ -5,14 +5,11 @@
 
 #include "kahan.hpp"
 
-#define M_PI_2        1.57079632679489661923	/* pi/2 */
-#define M_PI_2_INV    (1.0/M_PI_2)
-#define M_2_SQRTPI    1.12837916709551257390    /* 2/sqrt(pi) */
-#define ERF_COEF      (1.0/M_2_SQRTPI)
-
 Neuron::Neuron()
 {
     lastResult = 0.f;
+    bias = 0.f;
+    bias_delta = 0.f;
     ready = false;
     dropout = false;
 }
@@ -74,6 +71,16 @@ double Neuron::getInputWeight(Neuron* ptr) const
     return 0.f;
 }
 
+void Neuron::setBias(const double& b)
+{
+    bias = b;
+}
+
+double Neuron::getBias() const
+{
+    return bias;
+}
+
 bool Neuron::isReady() const
 {
     return ready;
@@ -96,10 +103,11 @@ double Neuron::getOutput()
                 continue;
             in = ((Neuron*)i.ptr)->getOutput();
         }
-        else
+        else // basically, input layer = just return the value (the neuron should have a single input in this case)
             in = (*((double*)i.ptr));
         to_sum.push_back(i.weight * in);
     }
+    to_sum.push_back(bias);
     ready = true;
     if(dropout)
     {
@@ -124,6 +132,7 @@ void Neuron::doGradient(double node_delta)
         if(i.isNeuron && !((Neuron*)i.ptr)->isDropout())
             i.sum_gradient.push_back(node_delta * ((Neuron*)i.ptr)->getOutput()); // gradient
     }
+    bias_gradient.push_back(node_delta);
 }
 
 void Neuron::applyDelta(double learning_rate, double momentum, double weight_decay)
@@ -132,18 +141,23 @@ void Neuron::applyDelta(double learning_rate, double momentum, double weight_dec
         return;
     if(!ready)
         return; // it means you shouldn't call this function
+    double previous;
     for(auto& i : inputs)
     {
         if(i.isNeuron && !((Neuron*)i.ptr)->isDropout())
         {
             std::sort(i.sum_gradient.begin(), i.sum_gradient.end(), std::greater<double>());
-            double tmp = i.delta;
-            i.delta = - learning_rate * DoubleSum(i.sum_gradient) + momentum * i.previous - i.weight * weight_decay; // loss function
-            i.previous = tmp;
+            previous = i.delta;
+            i.delta = - learning_rate * DoubleSum(i.sum_gradient) + momentum * previous - i.weight * weight_decay;
             i.weight += i.delta;
             i.sum_gradient.clear();
         }
     }
+    std::sort(bias_gradient.begin(), bias_gradient.end(), std::greater<double>());
+    previous = bias_delta;
+    bias_delta = - learning_rate * DoubleSum(bias_gradient) + momentum * previous;
+    bias += bias_delta;
+    bias_gradient.clear();
 }
 
 void Neuron::unready()

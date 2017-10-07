@@ -45,7 +45,7 @@ class NeuralNetwork
         void stopTraining();
         bool runTraining(const std::vector<std::vector<double> > &inputs, const std::vector<std::vector<double> > &outputs, const size_t &epochs, const double &learning_rate, const double &momentum, const double &weight_decay, const bool &dropout, const std::string& save_file = "");
         bool train(const std::vector<std::vector<double> >& inputs, const std::vector<std::vector<double> >& outputs, const double &learning_rate, const double &momentum, const double &weight_decay, const bool &dropout);
-        void print() const;
+        void print(const bool &detail = true) const;
         void printTraining() const;
         bool load(const std::string &filename);
         bool save(const std::string &filename);

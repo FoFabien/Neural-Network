@@ -11,7 +11,6 @@ struct NeuInput
     void* ptr = nullptr;
     double weight = 1.f;
     double delta = 0.f;
-    double previous = 0.f;
     std::vector<double> sum_gradient;
     bool isNeuron = false;
 };
@@ -28,6 +27,8 @@ class Neuron
         std::vector<NeuInput>& getInputs();
         bool isConnected(Neuron* ptr) const;
         double getInputWeight(Neuron* ptr) const;
+        void setBias(const double& b);
+        double getBias() const;
 
         void unready();
         bool isReady() const;
@@ -40,6 +41,9 @@ class Neuron
     protected:
         std::vector<NeuInput> inputs;
         double lastResult;
+        double bias;
+        double bias_delta;
+        std::vector<double> bias_gradient;
         bool ready;
         bool dropout;
 };

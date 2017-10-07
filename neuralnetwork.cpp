@@ -192,6 +192,7 @@ void NeuralNetwork::initNetwork()
     {
         for(size_t j = 0; j < network[i].size(); ++j)
         {
+            network[i][j]->setBias(d(gen));
             std::vector<NeuInput> &inputs = network[i][j]->getInputs();
             for(auto& k: inputs)
             {
@@ -284,19 +285,13 @@ bool NeuralNetwork::train(const std::vector<std::vector<double> >& inputs, const
         return false;
     }
 
-    // shuffle (create a random list of key to access inputs/outputs in a random order
-    std::vector<size_t> keys;
-    for(size_t i = 0; i < inputs.size(); ++i)
-        keys.push_back(i);
-    std::shuffle(std::begin(keys), std::end(keys), gen);
-
     int sleep_counter = 0;
     std::vector<double> vec1, vec2; // to contain stuff
 
     clearDropout();
     if(dropout)
         randomDropout();
-    for(auto& i: keys)
+    for(size_t i = 0; i < inputs.size(); ++i)
     {
         readyNetwork();
         setInput(inputs[i]);
@@ -307,11 +302,6 @@ bool NeuralNetwork::train(const std::vector<std::vector<double> >& inputs, const
             mutex.unlock();
             return false;
         }
-
-        /*double mse = 0.f; // mean square error
-        for(size_t j = 0; j < out.size(); ++j)
-            mse += (outputs[i][j] - out[j]) * (outputs[i][j] - out[j]);
-        mse /= out.size();*/
 
         // back propagation
         double node_delta;
@@ -357,7 +347,7 @@ bool NeuralNetwork::train(const std::vector<std::vector<double> >& inputs, const
     return true;
 }
 
-void NeuralNetwork::print() const
+void NeuralNetwork::print(const bool &detail) const
 {
     std::cout << network.size() << " layer(s)" << std::endl;
     for(size_t i = 0; i < network.size(); ++i)
@@ -365,7 +355,8 @@ void NeuralNetwork::print() const
         std::cout << " #" << i << "\t: " << network[i].size() << " neuron(s)" << std::endl;
         for(size_t j = 0; j < network[i].size(); ++j)
         {
-            std::cout << "\tNeuron " << j << " (addr=" << (int)(network[i][j]) << ") :" << std::endl;
+            std::cout << "\tNeuron " << j << " (addr=" << (int)(network[i][j]) << ") (bias=" << network[i][j]->getBias() << " :" << std::endl;
+            if(!detail) continue;
             std::vector<NeuInput> &inputs = network[i][j]->getInputs();
             for(auto& k: inputs)
             {
@@ -390,7 +381,7 @@ void NeuralNetwork::printTraining() const
     }
 }
 
-#define FVERSION 3
+#define FVERSION 4
 bool NeuralNetwork::load(const std::string &filename)
 {
     mutex.lock();
@@ -402,16 +393,17 @@ bool NeuralNetwork::load(const std::string &filename)
     }
     std::map<size_t, Neuron*> list;
     size_t tmp;
+    size_t version;
     std::string str;
     size_t last = 0;
-    f >> tmp;
-    if(tmp > FVERSION)
+    f >> version;
+    if(version > FVERSION)
     {
         mutex.unlock();
         return false;
     }
 
-    if(tmp == 1) // backward compatibility
+    if(version == 1) // backward compatibility
         f >> tmp; // sigmoid type
 
     // clear
@@ -436,7 +428,6 @@ bool NeuralNetwork::load(const std::string &filename)
     for(size_t i = 0; i < tmp; ++i)
         in.push_back(0);
 
-
     for(auto& i : network)
     {
         f >> tmp;
@@ -447,6 +438,12 @@ bool NeuralNetwork::load(const std::string &filename)
         {
             f >> tmp;
             list[tmp] = j;
+            if(version >= 4)
+            {
+                f >> str; // bias
+                j->setBias(textToDouble(str));
+            }
+
             size_t input_count;
             f >> input_count;
             for(size_t k = 0; k < input_count; ++k)
@@ -499,7 +496,7 @@ bool NeuralNetwork::save(const std::string &filename)
                 list[j] = last;
                 ++last;
             }
-            f << list[j] << " ";
+            f << list[j] << " " << doubleToText(j->getBias()) << " ";
             std::vector<NeuInput>& inputs = j->getInputs();
             f << inputs.size() << " ";
             for(auto& k : inputs)

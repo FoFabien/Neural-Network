@@ -23,8 +23,8 @@ void loadAndRun(const std::string &file)
             const std::vector<double>& res = test.getOutputs();
             std::cout << " | Output(s): ";
             for(const double& r : res)
-                if(r > 0.9) std::cout << "1 (" << r << ")";
-                else if(r < 0.1) std::cout << "0 (" << r << ")";
+                if(r > 0.7) std::cout << "1 (" << r << ")";
+                else if(r < 0.3) std::cout << "0 (" << r << ")";
                 else std::cout << "? (" << r << ") ";
             std::cout << std::endl;
         }
@@ -38,7 +38,7 @@ void train(NeuralNetwork &test)
 {
     std::vector<std::vector<double> > inputs = {{0, 0}, {0, 1}, {1, 1}, {1, 0}};
     std::vector<std::vector<double> > outputs = {{0}, {1}, {0}, {1}};
-    test.runTraining(inputs, outputs, 10000, 0.7, 0.3, 0.0001, false, "");
+    test.runTraining(inputs, outputs, 100000, 0.7, 0.3, 0.0001, false, "");
 }
 
 void createAndTrain(const std::string &file)
