@@ -54,8 +54,6 @@ NeuralNetwork::NeuralNetwork(std::vector<std::vector<Neuron*> > &net)
         return;
     for(size_t i = 0; i < network[0].size(); ++i)
         in.push_back(0);
-    for(size_t i = 0; i < network[0].size(); ++i)
-        network[0][i]->addInput(&in[i]);
     for(size_t i = 0; i < network.back().size(); ++i)
         out.push_back(0);
 
@@ -281,6 +279,7 @@ bool NeuralNetwork::train(const std::vector<std::vector<double> >& inputs, const
     mutex.lock();
     if(inputs.size() != outputs.size() || inputs.empty())
     {
+        std::cout << "dataset size error" << std::endl;
         mutex.unlock();
         return false;
     }
@@ -299,6 +298,7 @@ bool NeuralNetwork::train(const std::vector<std::vector<double> >& inputs, const
 
         if(out.size() != outputs[i].size() || out.empty())
         {
+            std::cout << "output size error" << std::endl;
             mutex.unlock();
             return false;
         }
@@ -355,7 +355,7 @@ void NeuralNetwork::print(const bool &detail) const
         std::cout << " #" << i << "\t: " << network[i].size() << " neuron(s)" << std::endl;
         for(size_t j = 0; j < network[i].size(); ++j)
         {
-            std::cout << "\tNeuron " << j << " (addr=" << (int)(network[i][j]) << ") (bias=" << network[i][j]->getBias() << " :" << std::endl;
+            std::cout << "\tNeuron " << j << " (addr=" << (int)(network[i][j]) << ") (bias=" << network[i][j]->getBias() << ") :" << std::endl;
             if(!detail) continue;
             std::vector<NeuInput> &inputs = network[i][j]->getInputs();
             for(auto& k: inputs)
@@ -544,7 +544,7 @@ NeuralNetwork* NeuralNetwork::merge(NeuralNetwork& A, NeuralNetwork& B)
 {
     std::vector<std::vector<Neuron*> > netA = A.stealNetwork();
     std::vector<std::vector<Neuron*> > netB = B.stealNetwork();
-    if(netB.size() > netA.size())
+    if(netB.size() > netA.size()) // network with the most layer is A
         netA.swap(netB);
 
     for(size_t i = 0; i < netB.size(); ++i)
