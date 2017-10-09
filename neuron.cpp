@@ -10,6 +10,7 @@ Neuron::Neuron()
     lastResult = 0.f;
     bias = 0.f;
     bias_delta = 0.f;
+    node_delta = 0.f;
     ready = false;
     dropout = false;
 }
@@ -19,46 +20,68 @@ Neuron::~Neuron()
 
 }
 
-void Neuron::addInput(Neuron *ptr, double weight)
-{
-    if(ptr)
-        addInput(NeuInput((void*)ptr, weight, true));
-}
-
-void Neuron::addInput(double *ptr, double weight)
-{
-    if(ptr)
-        addInput(NeuInput((void*)ptr, weight, false));
-}
-
-void Neuron::addInput(NeuInput in)
+void Neuron::addInput(const NeuLink &in)
 {
     inputs.push_back(in);
 }
 
+void Neuron::addOutput(const NeuLink &out)
+{
+    outputs.push_back(out);
+}
+
 void Neuron::delInput(void *ptr)
 {
-    for(std::vector<NeuInput>::iterator it = inputs.begin(); it != inputs.end(); ++it)
+    for(std::vector<NeuLink>::iterator it = inputs.begin(); it != inputs.end(); ++it)
     {
-        if(it->ptr == ptr)
+        if(it->input.ptr == ptr)
         {
+            if(it->input.isNeuron)
+                ((Neuron*)it->input.ptr)->delOutput(this);
             inputs.erase(it);
             return;
         }
     }
 }
 
-std::vector<NeuInput>& Neuron::getInputs()
+void Neuron::delOutput(void *ptr)
+{
+    for(std::vector<NeuLink>::iterator it = outputs.begin(); it != outputs.end(); ++it)
+    {
+        if(it->output.ptr == ptr)
+        {
+            outputs.erase(it);
+            return;
+        }
+    }
+}
+
+std::vector<NeuLink>& Neuron::getInputLinks()
 {
     return inputs;
 }
 
-bool Neuron::isConnected(Neuron* ptr) const
+std::vector<NeuLink>& Neuron::getOutputLinks()
+{
+    return outputs;
+}
+
+bool Neuron::isInputOf(Neuron* ptr) const
+{
+    if(dropout) // dropout aren't considered as connected
+        return false;
+    for(auto &i: outputs)
+        if(i.output.isNeuron && ptr == (Neuron*)i.output.ptr)
+            return true;
+    return false;
+}
+
+bool Neuron::isOutputOf(Neuron* ptr) const
 {
     if(dropout) // dropout aren't considered as connected
         return false;
     for(auto &i: inputs)
-        if(i.isNeuron && ptr == (Neuron*)i.ptr)
+        if(i.input.isNeuron && ptr == (Neuron*)i.input.ptr)
             return true;
     return false;
 }
@@ -66,8 +89,8 @@ bool Neuron::isConnected(Neuron* ptr) const
 double Neuron::getInputWeight(Neuron* ptr) const
 {
     for(auto &i: inputs)
-        if(i.isNeuron && ptr == (Neuron*)i.ptr)
-            return i.weight;
+        if(i.input.isNeuron && ptr == (Neuron*)i.input.ptr)
+            return i.data->weight;
     return 0.f;
 }
 
@@ -79,6 +102,16 @@ void Neuron::setBias(const double& b)
 double Neuron::getBias() const
 {
     return bias;
+}
+
+void Neuron::setNodeDelta(const double& d)
+{
+    node_delta = d;
+}
+
+double Neuron::getNodeDelta() const
+{
+    return node_delta;
 }
 
 bool Neuron::isReady() const
@@ -95,17 +128,18 @@ double Neuron::getOutput()
     std::vector<double> to_sum;
     for(auto &i : inputs)
     {
-        if(i.ptr == nullptr)
+        void* n = i.input.ptr;
+        if(!n)
             continue;
-        if(i.isNeuron)
+        if(i.input.isNeuron)
         {
-            if(((Neuron*)i.ptr)->isDropout())
+            if(((Neuron*)n)->isDropout())
                 continue;
-            in = ((Neuron*)i.ptr)->getOutput();
+            in = ((Neuron*)n)->getOutput();
         }
         else // basically, input layer = just return the value (the neuron should have a single input in this case)
-            in = (*((double*)i.ptr));
-        to_sum.push_back(i.weight * in);
+            in = (*((double*)n));
+        to_sum.push_back(i.data->weight * in);
     }
     to_sum.push_back(bias);
     ready = true;
@@ -129,8 +163,9 @@ void Neuron::doGradient(double node_delta)
         return; // it means you shouldn't call this function
     for(auto& i : inputs)
     {
-        if(i.isNeuron && !((Neuron*)i.ptr)->isDropout())
-            i.sum_gradient.push_back(node_delta * ((Neuron*)i.ptr)->getOutput()); // gradient
+        void* n = i.input.ptr;
+        if(i.input.isNeuron && !((Neuron*)n)->isDropout())
+            i.data->sum_gradient.push_back(node_delta * ((Neuron*)n)->getOutput()); // gradient
     }
     bias_gradient.push_back(node_delta);
 }
@@ -144,18 +179,19 @@ void Neuron::applyDelta(double learning_rate, double momentum, double weight_dec
     double previous;
     for(auto& i : inputs)
     {
-        if(i.isNeuron && !((Neuron*)i.ptr)->isDropout())
+        void* n = i.input.ptr;
+        if(i.input.isNeuron && !((Neuron*)n)->isDropout())
         {
-            std::sort(i.sum_gradient.begin(), i.sum_gradient.end(), std::greater<double>());
-            previous = i.delta;
-            i.delta = - learning_rate * DoubleSum(i.sum_gradient) + momentum * previous - i.weight * weight_decay;
-            i.weight += i.delta;
-            i.sum_gradient.clear();
+            std::sort(i.data->sum_gradient.begin(), i.data->sum_gradient.end(), std::greater<double>());
+            previous = i.data->delta;
+            i.data->delta = - learning_rate * DoubleSum(i.data->sum_gradient) + momentum * previous - i.data->weight * weight_decay;
+            i.data->weight += i.data->delta;
+            i.data->sum_gradient.clear();
         }
     }
     std::sort(bias_gradient.begin(), bias_gradient.end(), std::greater<double>());
     previous = bias_delta;
-    bias_delta = - learning_rate * DoubleSum(bias_gradient) + momentum * previous;
+    bias_delta = - learning_rate * DoubleSum(bias_gradient) + momentum * previous - bias * weight_decay;
     bias += bias_delta;
     bias_gradient.clear();
 }

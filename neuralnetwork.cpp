@@ -34,7 +34,7 @@ NeuralNetwork::NeuralNetwork(std::vector<size_t> sizes)
             network.back().push_back(new Neuron());
     }
     for(size_t i = 0; i < network[0].size(); ++i)
-        network[0][i]->addInput(&in[i]);
+        network[0][i]->addInput(NeuLink(NeuItem(&in[i], false), NeuItem(network[0][i], true)));
     for(size_t i = 0; i < network.back().size(); ++i)
         out.push_back(0);
 
@@ -88,12 +88,17 @@ void NeuralNetwork::clear()
 
 bool NeuralNetwork::connectNeurons(NeuCoor a, NeuCoor b)
 {
-    if(a.layer >= network.size() || a.neuron >= network[a.layer].size() || b.layer >= network.size() || b.neuron >= network[b.layer].size() || a.layer >= b.layer)
+    if(a.layer >= network.size() || a.neuron >= network[a.layer].size() || b.layer >= network.size() || b.neuron >= network[b.layer].size())
         return false;
     if(a.layer == b.layer && a.neuron == b.neuron)
         return false;
-    if(!network[b.layer][b.neuron]->isConnected(network[a.layer][a.neuron]))
-        network[b.layer][b.neuron]->addInput(network[a.layer][a.neuron]);
+    if(!network[b.layer][b.neuron]->isOutputOf(network[a.layer][a.neuron]))
+    {
+        NeuLink link(NeuItem(network[a.layer][a.neuron], true), NeuItem(network[b.layer][b.neuron], true));
+        network[b.layer][b.neuron]->addInput(link);
+        network[a.layer][a.neuron]->addOutput(link);
+    }
+
     return true;
 }
 
@@ -134,14 +139,23 @@ void NeuralNetwork::resizeLayer(size_t layer, size_t size)
         {
             network[layer].push_back(new Neuron());
             for(size_t i = 0; i < network[layer-1].size(); ++i)
-                network[layer].back()->addInput(network[layer-1][i], d(gen));
+            {
+                NeuLink link(NeuItem(network[layer-1][i], true), NeuItem(network[layer].back(), true), d(gen));
+                network[layer].back()->addInput(link);
+                network[layer-1][i]->addOutput(link);
+            }
             for(size_t i = 0; layer+1 < network.size() && i < network[layer+1].size(); ++i)
-                network[layer+1][i]->addInput(network[layer].back(), d(gen));
+            {
+                NeuLink link(NeuItem(network[layer].back(), true), NeuItem(network[layer+1][i], true), d(gen));
+                network[layer+1][i]->addInput(link);
+                network[layer].back()->addOutput(link);
+            }
         }
         while(network[layer].size() > size)
         {
             for(size_t i = 0; layer+1 < network.size() && i < network[layer+1].size(); ++i)
                 network[layer+1][i]->delInput(network[layer].back());
+
             delete network[layer].back();
             network[layer].pop_back();
         }
@@ -151,9 +165,11 @@ void NeuralNetwork::resizeLayer(size_t layer, size_t size)
 
 void NeuralNetwork::calcOutputs()
 {
+    if(out.size() != network.back().size())
+        out.resize(network.back().size(), 0.f);
     if(network.size() >= 2)
     {
-        for(size_t i = 0; i < out.size() && i < network.back().size(); ++i)
+        for(size_t i = 0; i < out.size(); ++i)
             out[i] = network.back()[i]->getOutput();
     }
 }
@@ -176,7 +192,7 @@ double NeuralNetwork::getWeight(NeuCoor a, NeuCoor b)
         return false;
     if(a.layer == b.layer && a.neuron == b.neuron)
         return false;
-    if(network[b.layer][b.neuron]->isConnected(network[a.layer][a.neuron]))
+    if(network[b.layer][b.neuron]->isOutputOf(network[a.layer][a.neuron]))
     {
         return network[b.layer][b.neuron]->getInputWeight(network[a.layer][a.neuron]);
     }
@@ -191,10 +207,10 @@ void NeuralNetwork::initNetwork()
         for(size_t j = 0; j < network[i].size(); ++j)
         {
             network[i][j]->setBias(d(gen));
-            std::vector<NeuInput> &inputs = network[i][j]->getInputs();
+            std::vector<NeuLink> &inputs = network[i][j]->getInputLinks();
             for(auto& k: inputs)
             {
-                k.weight = d(gen);
+                k.data->weight = d(gen);
             }
         }
     }
@@ -285,11 +301,12 @@ bool NeuralNetwork::train(const std::vector<std::vector<double> >& inputs, const
     }
 
     int sleep_counter = 0;
-    std::vector<double> vec1, vec2; // to contain stuff
+    std::vector<std::vector<std::vector<double> > > weights; // weight list for hidden layer
 
-    clearDropout();
+    clearDropout(); // set dropout
     if(dropout)
         randomDropout();
+
     for(size_t i = 0; i < inputs.size(); ++i)
     {
         readyNetwork();
@@ -320,21 +337,16 @@ bool NeuralNetwork::train(const std::vector<std::vector<double> >& inputs, const
                     sum.clear();
                     if(!network[j][k]->isDropout())
                     {
-                        for(size_t l = 0; l < network[j+1].size(); ++l)
-                        {
-                            if(network[j+1][l]->isConnected(network[j][k]))
-                            {
-                                sum.push_back(network[j+1][l]->getInputWeight(network[j][k]) * vec2[l]);
-                            }
-                        }
+                        std::vector<NeuLink>& links = network[j][k]->getOutputLinks();
+                        for(auto& l: links)
+                            sum.push_back(l.data->weight * ((Neuron*)l.output.ptr)->getNodeDelta());
                         std::sort(sum.begin(), sum.end(), std::greater<double>());
                     }
-                    node_delta = tmp * (1 - tmp) /*derivative*/ * DoubleSum(sum) /*sum weight*node_delta of next layer*/;
+                    node_delta = tmp * (1 - tmp) /*derivative*/ * DoubleSum(sum) /*sum of all weight*node_delta of outputs*/;
                 }
                 network[j][k]->doGradient(node_delta);
-                vec1.push_back(node_delta);
+                network[j][k]->setNodeDelta(node_delta);
             }
-            vec2 = std::move(vec1);
         }
         ++sleep_counter;
         if(train_sleep_counter > 1 && sleep_counter % train_sleep_counter == 0)
@@ -355,16 +367,21 @@ void NeuralNetwork::print(const bool &detail) const
         std::cout << " #" << i << "\t: " << network[i].size() << " neuron(s)" << std::endl;
         for(size_t j = 0; j < network[i].size(); ++j)
         {
-            std::cout << "\tNeuron " << j << " (addr=" << (int)(network[i][j]) << ") (bias=" << network[i][j]->getBias() << ") :" << std::endl;
-            if(!detail) continue;
-            std::vector<NeuInput> &inputs = network[i][j]->getInputs();
+            std::cout << "\tNeuron " << j << " (addr=" << (int)(network[i][j]) << ") (bias=" << network[i][j]->getBias() << "): ";
+            if(!detail)
+            {
+                std::cout << network[i][j]->getInputLinks().size() << " input(s)" << std::endl;
+                continue;
+            }
+            std::cout << std::endl;
+            std::vector<NeuLink> &inputs = network[i][j]->getInputLinks();
             for(auto& k: inputs)
             {
-                std::cout << "\t\tInput weight: " << k.weight;
-                if(k.isNeuron)
-                    std::cout << "\tto Neuron (addr=" << (int)k.ptr << ")" << std::endl;
+                std::cout << "\t\tInput weight: " << k.data->weight;
+                if(k.input.isNeuron)
+                    std::cout << "\tto Neuron (addr=" << (int)k.input.ptr << ")" << std::endl;
                 else
-                    std::cout << "\tto Value (addr=" << (int)k.ptr << ")=" << (*(double*)(k.ptr)) << std::endl;
+                    std::cout << "\tto Value (addr=" << (int)k.input.ptr << ")=" << (*(double*)(k.input.ptr)) << std::endl;
             }
         }
     }
@@ -389,6 +406,7 @@ bool NeuralNetwork::load(const std::string &filename)
     if(!f)
     {
         mutex.unlock();
+        std::cout << "can't open " << filename << std::endl;
         return false;
     }
     std::map<size_t, Neuron*> list;
@@ -400,6 +418,7 @@ bool NeuralNetwork::load(const std::string &filename)
     if(version > FVERSION)
     {
         mutex.unlock();
+        std::cout << filename << " : bad version" << std::endl;
         return false;
     }
 
@@ -416,21 +435,40 @@ bool NeuralNetwork::load(const std::string &filename)
     out.clear();
 
     f >> tmp;
+    if(f.eof())
+    {
+        mutex.unlock();
+        std::cout << filename << " : corrupt file" << std::endl;
+        return false;
+    }
     for(size_t i = 0; i < tmp; ++i)
         network.push_back(std::vector<Neuron*>());
     if(network.size() < 2)
     {
         mutex.unlock();
+        std::cout << filename << " : invalid network" << std::endl;
         return false;
     }
 
     f >> tmp;
+    if(f.eof())
+    {
+        mutex.unlock();
+        std::cout << filename << " : corrupt file" << std::endl;
+        return false;
+    }
     for(size_t i = 0; i < tmp; ++i)
         in.push_back(0);
 
     for(auto& i : network)
     {
         f >> tmp;
+        if(f.eof())
+        {
+            mutex.unlock();
+            std::cout << filename << " : corrupt file" << std::endl;
+            return false;
+        }
         for(size_t j = 0; j < tmp; ++j)
             i.push_back(new Neuron());
 
@@ -452,11 +490,13 @@ bool NeuralNetwork::load(const std::string &filename)
                 if(tmp == 1)
                 {
                     f >> tmp >> str; // str is the weight
-                    j->addInput(list[tmp], textToDouble(str));
+                    NeuLink n(NeuItem(list[tmp], true), NeuItem(j, true), textToDouble(str));
+                    j->addInput(n);
+                    list[tmp]->addOutput(n);
                 }
                 else
                 {
-                    j->addInput(&in[last]);
+                    j->addInput(NeuLink(NeuItem(&in[last], false), NeuItem(j, true)));
                     ++last;
                 }
             }
@@ -497,13 +537,13 @@ bool NeuralNetwork::save(const std::string &filename)
                 ++last;
             }
             f << list[j] << " " << doubleToText(j->getBias()) << " ";
-            std::vector<NeuInput>& inputs = j->getInputs();
+            std::vector<NeuLink>& inputs = j->getInputLinks();
             f << inputs.size() << " ";
             for(auto& k : inputs)
             {
-                if(k.isNeuron)
+                if(k.input.isNeuron)
                 {
-                    f << (size_t)1 << " " << list[(Neuron*)k.ptr] << " " << doubleToText(k.weight) << " ";
+                    f << (size_t)1 << " " << list[(Neuron*)k.input.ptr] << " " << doubleToText(k.data->weight) << " ";
                 }
                 else
                 {
@@ -534,8 +574,6 @@ void NeuralNetwork::setNetwork(std::vector<std::vector<Neuron*> > &net)
         return;
     for(size_t i = 0; i < network[0].size(); ++i)
         in.push_back(0);
-    for(size_t i = 0; i < network[0].size(); ++i)
-        network[0][i]->addInput(&in[i]);
     for(size_t i = 0; i < network.back().size(); ++i)
         out.push_back(0);
 }
