@@ -12,6 +12,7 @@ Neuron::Neuron()
     bias_delta = 0.f;
     node_delta = 0.f;
     ready = false;
+    isInput = false;
     dropout = false;
 }
 
@@ -123,6 +124,15 @@ double Neuron::getOutput()
 {
     if(ready)
         return lastResult;
+    if(isInput) // if it's an input neuron, no activation function
+    {
+        if(inputs.empty() || inputs[0].input.isNeuron || !(inputs[0].input.ptr)) // check to make sure there is a proper input
+            lastResult = 0;
+        else
+            lastResult = *((double*)(inputs[0].input.ptr));
+        ready = true;
+        return lastResult;
+    }
     double sum = 0;
     double in = 0;
     std::vector<double> to_sum;
@@ -155,12 +165,10 @@ double Neuron::getOutput()
     return lastResult;
 }
 
-void Neuron::doGradient(double node_delta)
+void Neuron::doGradient(const double &node_delta)
 {
-    if(dropout)
+    if(dropout || isInput || !ready)
         return;
-    if(!ready)
-        return; // it means you shouldn't call this function
     for(auto& i : inputs)
     {
         void* n = i.input.ptr;
@@ -170,12 +178,10 @@ void Neuron::doGradient(double node_delta)
     bias_gradient.push_back(node_delta);
 }
 
-void Neuron::applyDelta(double learning_rate, double momentum, double weight_decay)
+void Neuron::applyDelta(const double &learning_rate, const double &momentum, const double &weight_decay)
 {
-    if(dropout)
+    if(dropout || isInput || !ready)
         return;
-    if(!ready)
-        return; // it means you shouldn't call this function
     double previous;
     for(auto& i : inputs)
     {
@@ -199,6 +205,17 @@ void Neuron::applyDelta(double learning_rate, double momentum, double weight_dec
 void Neuron::unready()
 {
     ready = false;
+    node_delta = 0.f;
+}
+
+void Neuron::setInputNeuron(const bool& b)
+{
+    isInput = b;
+}
+
+bool Neuron::isInputNeuron() const
+{
+    return isInput;
 }
 
 void Neuron::setDropout(const bool& b)

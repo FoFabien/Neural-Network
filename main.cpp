@@ -12,13 +12,15 @@ void loadAndRun(const std::string &file)
         for(size_t i = 0; i < 4; ++i)
         {
             test.readyNetwork();
+            std::vector<double> inputs;
             switch(i)
             {
-                case 1: test.setInput({0, 1}); std::cout << "Input(s): 0 1 "; break;
-                case 2: test.setInput({1, 0}); std::cout << "Input(s): 1 0 "; break;
-                case 3: test.setInput({1, 1}); std::cout << "Input(s): 1 1 "; break;
-                default: test.setInput({0, 0}); std::cout << "Input(s): 0 0 "; break;
+                case 1: inputs = {0, 1}; std::cout << "Input(s): 0 1 "; break;
+                case 2: inputs = {1, 0}; std::cout << "Input(s): 1 0 "; break;
+                case 3: inputs = {1, 1}; std::cout << "Input(s): 1 1 "; break;
+                default: inputs = {0, 0}; std::cout << "Input(s): 0 0 "; break;
             }
+            test.setInput(inputs);
 
             const std::vector<double>& res = test.getOutputs();
             std::cout << " | Output(s): ";
@@ -33,12 +35,11 @@ void loadAndRun(const std::string &file)
         std::cout << "Can't load the neural network from " << file << std::endl;
 }
 
-
-void train(NeuralNetwork &test)
+bool train(NeuralNetwork &test)
 {
     std::vector<std::vector<double> > inputs = {{0, 0}, {0, 1}, {1, 1}, {1, 0}};
     std::vector<std::vector<double> > outputs = {{0}, {1}, {0}, {1}};
-    test.runTraining(inputs, outputs, 100000, 0.7, 0.3, 0.0001, false, "");
+    return test.runTraining(inputs, outputs, 100000, inputs.size(), 0.8, 0.2, 0.001, false, "");
 }
 
 void createAndTrain(const std::string &file)
@@ -46,8 +47,7 @@ void createAndTrain(const std::string &file)
     NeuralNetwork test({2, 2, 1});
     test.autoConnect();
     test.initNetwork();
-    train(test);
-    if(test.save(file))
+    if(train(test) && test.save(file))
         std::cout << "Network saved to " << file << std::endl;
 }
 
@@ -57,8 +57,7 @@ void resumeTraining(const std::string &file)
     if(test.load(file))
     {
         std::cout << "Network loaded from " << file << std::endl;
-        train(test);
-        if(test.save(file))
+        if(train(test) && test.save(file))
             std::cout << "Network saved to " << file << std::endl;
     }
     else

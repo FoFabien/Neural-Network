@@ -5,7 +5,7 @@
 #include <vector>
 #include <memory>
 
-struct NeuItem
+struct NeuItem // store a pointer to either a neuron or an input value
 {
     NeuItem(){}
     NeuItem(void* ptr, bool isNeuron): ptr(ptr), isNeuron(isNeuron){}
@@ -13,14 +13,14 @@ struct NeuItem
     bool isNeuron = false;
 };
 
-struct NeuWeight
+struct NeuWeight // store a weight and the variables for training it
 {
     double weight = 1.f;
     double delta = 0.f;
     std::vector<double> sum_gradient;
 };
 
-struct NeuLink
+struct NeuLink // link between two neurons
 {
     NeuLink(): data(new NeuWeight()){}
     NeuLink(NeuItem input, NeuItem output): input(input), output(output), data(new NeuWeight()){}
@@ -38,38 +38,45 @@ class Neuron
     public:
         Neuron();
         virtual ~Neuron();
-        void addInput(const NeuLink &in);
-        void addOutput(const NeuLink &out);
-        void delInput(void *ptr);
-        void delOutput(void *ptr);
-        std::vector<NeuLink>& getInputLinks();
-        std::vector<NeuLink>& getOutputLinks();
-        bool isInputOf(Neuron* ptr) const;
-        bool isOutputOf(Neuron* ptr) const;
-        double getInputWeight(Neuron* ptr) const;
-        void setBias(const double& b);
-        double getBias() const;
-        void setNodeDelta(const double& d);
-        double getNodeDelta() const;
+        void addInput(const NeuLink &in); // add an input to the neuron
+        void addOutput(const NeuLink &out); // add an output to the neuron
+        void delInput(void *ptr); // delete an input. Will also delete the ouput on the linked neuron
+        void delOutput(void *ptr); // shouldn't be called but it exists
+        std::vector<NeuLink>& getInputLinks(); // input list
+        std::vector<NeuLink>& getOutputLinks(); // output list
+        bool isInputOf(Neuron* ptr) const; // true if is an input of ptr
+        bool isOutputOf(Neuron* ptr) const; // true if is an output of ptr
+        double getInputWeight(Neuron* ptr) const; // return the weight, 0 if ptr isn't an input
+        void setBias(const double& b); // set the bias value
+        double getBias() const; // return the bias value
+        void setNodeDelta(const double& d); // set the node delta value used for training
+        double getNodeDelta() const; // return the node delta value
 
-        void unready();
-        bool isReady() const;
-        void setDropout(const bool& b);
+        void unready(); // set the neuron as not ready. Output will be calculated from scratch
+        bool isReady() const; // true if ready, meaning the output is already calculated
+        void setInputNeuron(const bool& b); // set the neuron in input mode
+        bool isInputNeuron() const;
+        void setDropout(const bool& b); // set the dropout state
         bool isDropout() const;
-        double getOutput();
-        void doGradient(double node_delta);
-        void applyDelta(double learning_rate, double momentum, double weight_decay);
+        double getOutput(); // return the output value
+        void doGradient(const double &node_delta); // finish the gradient calculation
+        void applyDelta(const double &learning_rate, const double &momentum, const double &weight_decay); // modify the weights (to be called after the batch is over)
 
     protected:
         std::vector<NeuLink> inputs;
         std::vector<NeuLink> outputs;
-        double lastResult;
+        double lastResult; // output value
+
+        // bias variable, it works like a weight
         double bias;
         double bias_delta;
         std::vector<double> bias_gradient;
-        double node_delta;
-        bool ready;
-        bool dropout;
+
+        double node_delta; // used for training
+
+        bool ready; // true if lastResult contains the output
+        bool isInput; // true if it's an input neuron
+        bool dropout; // true to disable the neuron
 };
 
 #endif // NEURON_HPP

@@ -3,6 +3,7 @@
 #include <fstream>
 #include <chrono>
 #include <thread>
+#include <future>
 #include <map>
 #include <algorithm>
 #include <set>
@@ -25,8 +26,6 @@ NeuralNetwork::NeuralNetwork(std::vector<size_t> sizes)
 {
     if(sizes.size() < 2)
         return;
-    for(size_t i = 0; i < sizes[0]; ++i)
-        in.push_back(0);
     for(auto &i: sizes)
     {
         network.push_back(std::vector<Neuron*>());
@@ -34,7 +33,7 @@ NeuralNetwork::NeuralNetwork(std::vector<size_t> sizes)
             network.back().push_back(new Neuron());
     }
     for(size_t i = 0; i < network[0].size(); ++i)
-        network[0][i]->addInput(NeuLink(NeuItem(&in[i], false), NeuItem(network[0][i], true)));
+        network[0][i]->addInput(NeuLink(NeuItem(nullptr, false), NeuItem(network[0][i], true)));
     for(size_t i = 0; i < network.back().size(); ++i)
         out.push_back(0);
 
@@ -52,8 +51,6 @@ NeuralNetwork::NeuralNetwork(std::vector<std::vector<Neuron*> > &net)
     network = net;
     if(network.size() < 2)
         return;
-    for(size_t i = 0; i < network[0].size(); ++i)
-        in.push_back(0);
     for(size_t i = 0; i < network.back().size(); ++i)
         out.push_back(0);
 
@@ -77,7 +74,6 @@ void NeuralNetwork::clear()
         for(size_t j = 0; j < network[i].size(); ++j)
             if(network[i][j])
                 delete network[i][j];
-    in.clear();
     out.clear();
     train_percent = 0;
     train_epoch = 0;
@@ -116,16 +112,20 @@ void NeuralNetwork::autoConnect()
     }
 }
 
-void NeuralNetwork::setInput(const double &value, const size_t &key)
+void NeuralNetwork::setInput(std::vector<double> &values)
 {
-    if(key < in.size())
-        in[key] = value;
-}
-
-void NeuralNetwork::setInput(const std::vector<double> &values)
-{
-    for(size_t i = 0; i < values.size() && i < in.size(); ++i)
-        in[i] = values[i];
+    if(values.size() != network[0].size())
+    {
+        std::cout << "input size error" << std::endl;
+        return;
+    }
+    std::vector<double>::iterator it = values.begin();
+    for(size_t i = 0; i < values.size(); ++i)
+    {
+        NeuLink& link = network[0][i]->getInputLinks()[0];
+        if(!link.input.isNeuron)
+            link.input.ptr = (void*)(&*(it+i));
+    }
 }
 
 void NeuralNetwork::resizeLayer(size_t layer, size_t size)
@@ -245,10 +245,20 @@ void NeuralNetwork::resumeTraining()
 
 void NeuralNetwork::stopTraining()
 {
-    train_stop = false;
+    train_stop = true;
 }
 
-bool NeuralNetwork::runTraining(const std::vector<std::vector<double> > &inputs, const std::vector<std::vector<double> > &outputs, const size_t &epochs, const double &learning_rate, const double& momentum, const double &weight_decay,const  bool &dropout, const std::string& save_file)
+size_t NeuralNetwork::trainingState() const
+{
+    if(train_stop)
+        return 0;
+    if(train_paused)
+        return 2;
+    return 1;
+}
+
+bool NeuralNetwork::runTraining(std::vector<std::vector<double> > &inputs, const std::vector<std::vector<double> > &outputs, const size_t &epochs, const size_t &batch_size, const double &learning_rate, const double& momentum, const double &weight_decay,const  bool &dropout,
+                                const std::string& save_file)
 {
     if(inputs.size() != outputs.size() || inputs.empty())
         return false;
@@ -260,6 +270,7 @@ bool NeuralNetwork::runTraining(const std::vector<std::vector<double> > &inputs,
     train_percent = 0;
     training = true;
     train_stop = false;
+    train_paused = false;
 
     // number of time the dataset is used
     for(train_epoch = 0; train_epoch < epochs; train_epoch++)
@@ -272,7 +283,7 @@ bool NeuralNetwork::runTraining(const std::vector<std::vector<double> > &inputs,
                 std::cout << "Failed to save to " << save_file << std::endl;
         }
 
-        if(!train(inputs, outputs, learning_rate, momentum, weight_decay, dropout))
+        if(!train(inputs, outputs, batch_size, learning_rate, momentum, weight_decay, dropout))
         {
             std::cout << "error at epoch " << train_epoch << std::endl;
             break;
@@ -284,13 +295,11 @@ bool NeuralNetwork::runTraining(const std::vector<std::vector<double> > &inputs,
         if(train_stop)
             break;
     }
-    train_stop = false;
-    train_paused = false;
     training = false;
     return true;
 }
 
-bool NeuralNetwork::train(const std::vector<std::vector<double> >& inputs, const std::vector<std::vector<double> >& outputs, const double &learning_rate, const double &momentum, const double &weight_decay, const bool &dropout)
+bool NeuralNetwork::train(std::vector<std::vector<double> >& inputs, const std::vector<std::vector<double> >& outputs, const size_t &batch_size, const double &learning_rate, const double &momentum, const double &weight_decay, const bool &dropout)
 {
     mutex.lock();
     if(inputs.size() != outputs.size() || inputs.empty())
@@ -301,13 +310,13 @@ bool NeuralNetwork::train(const std::vector<std::vector<double> >& inputs, const
     }
 
     int sleep_counter = 0;
-    std::vector<std::vector<std::vector<double> > > weights; // weight list for hidden layer
 
     clearDropout(); // set dropout
     if(dropout)
         randomDropout();
 
-    for(size_t i = 0; i < inputs.size(); ++i)
+    size_t i;
+    for(i = 0; i < inputs.size(); ++i)
     {
         readyNetwork();
         setInput(inputs[i]);
@@ -348,13 +357,14 @@ bool NeuralNetwork::train(const std::vector<std::vector<double> >& inputs, const
                 network[j][k]->setNodeDelta(node_delta);
             }
         }
+        if((batch_size > 0 && i % batch_size == 0) || i == inputs.size()-1)
+            for(size_t j = 1; j < network.size(); ++j)
+                for(size_t k = 0; k < network[j].size(); ++k)
+                    network[j][k]->applyDelta(learning_rate, momentum, weight_decay);
         ++sleep_counter;
         if(train_sleep_counter > 1 && sleep_counter % train_sleep_counter == 0)
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    for(size_t i = 1; i < network.size(); ++i)
-        for(size_t j = 0; j < network[i].size(); ++j)
-            network[i][j]->applyDelta(learning_rate, momentum, weight_decay);
     mutex.unlock();
     return true;
 }
@@ -367,7 +377,10 @@ void NeuralNetwork::print(const bool &detail) const
         std::cout << " #" << i << "\t: " << network[i].size() << " neuron(s)" << std::endl;
         for(size_t j = 0; j < network[i].size(); ++j)
         {
-            std::cout << "\tNeuron " << j << " (addr=" << (int)(network[i][j]) << ") (bias=" << network[i][j]->getBias() << "): ";
+            std::cout << "\t";
+            if(network[i][j]->isInputNeuron())
+                std::cout << "Input ";
+            std::cout << "Neuron " << j << " (addr=" << (int)(network[i][j]) << ") (bias=" << network[i][j]->getBias() << "): ";
             if(!detail)
             {
                 std::cout << network[i][j]->getInputLinks().size() << " input(s)" << std::endl;
@@ -377,11 +390,19 @@ void NeuralNetwork::print(const bool &detail) const
             std::vector<NeuLink> &inputs = network[i][j]->getInputLinks();
             for(auto& k: inputs)
             {
-                std::cout << "\t\tInput weight: " << k.data->weight;
-                if(k.input.isNeuron)
-                    std::cout << "\tto Neuron (addr=" << (int)k.input.ptr << ")" << std::endl;
+                std::cout << "\t\tInput weight: " << k.data->weight << "\tto ";
+                if(k.input.ptr == nullptr)
+                {
+                    std::cout << "Invalid Pointer (did you set the inputs?)" << std::endl;
+                }
+                else if(k.input.isNeuron)
+                {
+                    std::cout << "Neuron (addr=" << (int)k.input.ptr << ")" << std::endl;
+                }
                 else
-                    std::cout << "\tto Value (addr=" << (int)k.input.ptr << ")=" << (*(double*)(k.input.ptr)) << std::endl;
+                {
+                    std::cout << "Value (addr=" << (int)k.input.ptr << ")=" << (*(double*)(k.input.ptr)) << std::endl;
+                }
             }
         }
     }
@@ -398,7 +419,7 @@ void NeuralNetwork::printTraining() const
     }
 }
 
-#define FVERSION 4
+#define FVERSION 6
 bool NeuralNetwork::load(const std::string &filename)
 {
     mutex.lock();
@@ -412,6 +433,7 @@ bool NeuralNetwork::load(const std::string &filename)
     std::map<size_t, Neuron*> list;
     size_t tmp;
     size_t version;
+    bool boolean;
     std::string str;
     size_t last = 0;
     f >> version;
@@ -431,7 +453,7 @@ bool NeuralNetwork::load(const std::string &filename)
         if(network[i][j])
             delete network[i][j];
     network.clear();
-    in.clear();
+    //in.clear();
     out.clear();
 
     f >> tmp;
@@ -450,15 +472,16 @@ bool NeuralNetwork::load(const std::string &filename)
         return false;
     }
 
-    f >> tmp;
-    if(f.eof())
+    if(version < 5)
     {
-        mutex.unlock();
-        std::cout << filename << " : corrupt file" << std::endl;
-        return false;
+        f >> tmp;
+        if(f.eof())
+        {
+            mutex.unlock();
+            std::cout << filename << " : corrupt file" << std::endl;
+            return false;
+        }
     }
-    for(size_t i = 0; i < tmp; ++i)
-        in.push_back(0);
 
     for(auto& i : network)
     {
@@ -476,6 +499,16 @@ bool NeuralNetwork::load(const std::string &filename)
         {
             f >> tmp;
             list[tmp] = j;
+            if(version < 6) // is input neuron or not
+            {
+                if(&i == &network[0]) // we assume only the first layer contains only input neurons for backward compatibility
+                    j->setInputNeuron(true);
+            }
+            else
+            {
+                f >> boolean;
+                j->setInputNeuron(boolean);
+            }
             if(version >= 4)
             {
                 f >> str; // bias
@@ -496,7 +529,7 @@ bool NeuralNetwork::load(const std::string &filename)
                 }
                 else
                 {
-                    j->addInput(NeuLink(NeuItem(&in[last], false), NeuItem(j, true)));
+                    j->addInput(NeuLink(NeuItem(nullptr, false), NeuItem(j, true)));
                     ++last;
                 }
             }
@@ -509,7 +542,6 @@ bool NeuralNetwork::load(const std::string &filename)
     train_percent = 0;
     train_epoch = 0;
     training = false;
-    //std::cout << "Loaded from " << filename << std::endl;
     mutex.unlock();
     return true;
 }
@@ -525,7 +557,7 @@ bool NeuralNetwork::save(const std::string &filename)
     }
     std::map<Neuron*, size_t> list;
     size_t last = 0;
-    f << (size_t)FVERSION << " " << network.size() << " " << in.size() << " ";
+    f << (size_t)FVERSION << " " << network.size() << " ";
     for(auto& i : network)
     {
         f << i.size() << " ";
@@ -536,7 +568,7 @@ bool NeuralNetwork::save(const std::string &filename)
                 list[j] = last;
                 ++last;
             }
-            f << list[j] << " " << doubleToText(j->getBias()) << " ";
+            f << list[j] << " " << j->isInputNeuron() << " " << doubleToText(j->getBias()) << " ";
             std::vector<NeuLink>& inputs = j->getInputLinks();
             f << inputs.size() << " ";
             for(auto& k : inputs)
@@ -552,7 +584,6 @@ bool NeuralNetwork::save(const std::string &filename)
             }
         }
     }
-    //std::cout << "Saved to " << filename << std::endl;
     mutex.unlock();
     return true;
 }
@@ -561,7 +592,6 @@ std::vector<std::vector<Neuron*> > NeuralNetwork::stealNetwork()
 {
     std::vector<std::vector<Neuron*> > net = network;
     network.clear();
-    in.clear();
     out.clear();
     return net;
 }
@@ -572,8 +602,6 @@ void NeuralNetwork::setNetwork(std::vector<std::vector<Neuron*> > &net)
     network = net;
     if(network.size() < 2)
         return;
-    for(size_t i = 0; i < network[0].size(); ++i)
-        in.push_back(0);
     for(size_t i = 0; i < network.back().size(); ++i)
         out.push_back(0);
 }
@@ -600,7 +628,6 @@ NeuralNetwork* NeuralNetwork::merge(NeuralNetwork& A, NeuralNetwork& B)
 
 void NeuralNetwork::randomDropout()
 {
-    //std::cout << "Dropout (per layer): ";
     for(auto& i: network)
     {
         if(i.size() < 2)
@@ -608,7 +635,6 @@ void NeuralNetwork::randomDropout()
         std::uniform_int_distribution<> d1(1, i.size()/2);
         std::uniform_int_distribution<> d2(0, i.size()-1);
         int n = d1(gen);
-        //std::cout << n << "/" << i.size() << " ";
         std::set<size_t> dropped;
         while(n > 0)
         {
@@ -621,7 +647,6 @@ void NeuralNetwork::randomDropout()
             }
         }
     }
-    //std::cout << std::endl;
 }
 
 void NeuralNetwork::clearDropout()
